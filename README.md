@@ -40,15 +40,33 @@ The page refuses to open a book, and says why, when:
 | Action | How |
 |---|---|
 | Select a span | Click it |
-| Accept | `A` or the Accept button next to the span, then it jumps to the next unchecked span |
+| Accept | `A` or the Accept button under the span, then it jumps to the next unchecked span |
 | Drop / restore | `D` |
-| Fix the edges | `E` (or Edit), then move the start or end one syllable at a time, or select the right text and press "Use my selected text" |
-| Add a missed span | Select the text, then `N` or "+ Add selected text" |
+| Fix the edges | `E`, the Edit button, or double-click the span. Drag the blue handles at its start and end. Edges snap to whole syllables; hold Alt (Option) to move by single letters. The arrow buttons move an edge one syllable at a time. |
+| Replace a span's text | While editing, select the right text and press "Set as this span's text" |
+| Add a missed span | Select the text with the mouse, then press "+ Add as new span" next to it (or `N`) |
 | Next unchecked / previous | `J` / `K` |
-| Undo | `Ctrl+Z` / `Cmd+Z` |
+| Undo | `Ctrl+Z` / `Cmd+Z` (one drag = one undo) |
 
-Colours: blue = not checked, green = accepted, yellow = edited, red = dropped,
-purple = added. A red underline means two spans overlap.
+Span status is shown by text colour: blue = not checked, green = accepted,
+orange = edited, red struck through = dropped, purple = added. The selected span
+is underlined. A wavy red underline means two spans overlap.
+
+### Overlapping spans
+
+Two spans of the same annotation shouldn't overlap. When you add a span or
+change one so that it overlaps another, **the one you just touched wins** and the
+other is fitted around it:
+
+- it partly overlaps → the other span is shortened;
+- the other span is completely inside it → the other span is dropped;
+- it sits inside a bigger span → the bigger span is split into two parts around it.
+
+A yellow warning bar says exactly what changed, with an Undo button.
+
+Overlaps that are already in the original file are shown with a wavy red
+underline, and a warning appears when the book opens. Edit or drop one of the two
+spans and the same rule fixes the other.
 
 Work is also backed up in the browser as you go. If the tab closes, reopening the
 same book offers to bring it back. Export often anyway, because the export file is

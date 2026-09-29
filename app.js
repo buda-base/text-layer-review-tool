@@ -21,6 +21,8 @@ const BREAKS = new Set(["་","༌","།","༎","༑","༔"," ","\n","\r","\t"])
 const isBreak = ch => BREAKS.has(ch);
 const isSpace = ch => /\s/.test(ch);
 const $ = id => document.getElementById(id);
+// Attach an event only if the element exists, so one missing element can't stop the rest of the page
+const on = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); else console.warn("Missing element #" + id + " — is index.html up to date?"); };
 
 const S = {
   // upload
@@ -272,6 +274,8 @@ function startReview(){
   refreshAll();
   const first = sorted().find(x => x.status === "todo");
   if (first) select(first.id, true);
+  const ov = overlapPairs();
+  if (ov.n) toast(`⚠ ${ov.n} span${ov.n > 1 ? "s overlap" : " overlaps"} another span in this file (wavy red underline). Edit or drop one of them: the one you change wins and the other is fitted around it.`, [{label: "Show first", fn: () => select(ov.first.id, true)}]);
 }
 $("resumeBtn").onclick = () => {
   const saved = loadLocal(S.key);
@@ -351,7 +355,7 @@ function renderChanges(){
   if (!ch.length){ c.innerHTML = `<span class="muted">Nothing changed yet.</span>`; return; }
   for (const x of ch){
     const d = document.createElement("div");
-    d.innerHTML = `<span class="badge st-${x.status}">${LABEL[x.status]}</span><span class="tib"></span>`;
+    d.innerHTML = `<span class="tag st-${x.status}">${LABEL[x.status]}</span><span class="tib"></span>`;
     d.lastChild.textContent = S.text.slice(x.s, Math.min(x.e, x.s + 30)) + (x.e - x.s > 30 ? "…" : "");
     d.onclick = () => select(x.id, true);
     c.append(d);
@@ -363,20 +367,25 @@ function renderPop(){
   const pop = $("pop");
   const sp = current();
   const els = sp ? $("text").querySelectorAll(`[data-id="${CSS.escape(sp.id)}"]`) : [];
-  if (!sp || !els.length){ pop.classList.add("hidden"); return; }
+  $("text").classList.toggle("editing", !!(sp && S.editing));
+  if (!sp || !els.length){ pop.classList.add("hidden"); positionHandles(); return; }
   const dropped = sp.status === "dropped";
   pop.innerHTML = `
     <div class="row">
       ${dropped ? "" : `<button class="accept" data-act="accept">✓ Accept <kbd>A</kbd></button>`}
       <button class="drop-btn" data-act="drop">${dropped ? "Restore" : "Drop"} <kbd>D</kbd></button>
-      ${dropped ? "" : `<button data-act="edit">${S.editing ? "Done" : "Edit"} <kbd>E</kbd></button>`}
-      <span class="muted">${LABEL[sp.status]}</span>
+      ${dropped ? "" : `<button data-act="edit">${S.editing ? "✓ Done editing" : "Edit"} <kbd>E</kbd></button>`}
+      <span class="tag st-${sp.status}">${LABEL[sp.status]}</span>
     </div>
     ${S.editing && !dropped ? `
-    <div class="row"><span class="lbl">Start</span><button data-n="s,-1" title="One syllable earlier">&larr;</button><button data-n="s,1" title="One syllable later">&rarr;</button>
-      <span class="lbl" style="margin-left:8px">End</span><button data-n="e,-1" title="One syllable earlier">&larr;</button><button data-n="e,1" title="One syllable later">&rarr;</button></div>
-    <div class="row"><button data-act="usesel">Use my selected text</button>${sp.s !== sp.os || sp.e !== sp.oe ? `<button data-act="reset">Put edges back</button>` : ""}</div>` : ""}`;
-  pop.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({accept, drop, edit: toggleEdit, usesel: useSelection, reset: resetEdges})[b.dataset.act]());
+    <div class="hint">Drag the blue handles at the start and end of the span. Hold Alt (Option) while dragging to move by single letters.</div>
+    <div class="row">
+      <span class="muted">Fine-tune</span>
+      <button data-n="s,-1" title="Start one syllable earlier">&larr; start</button><button data-n="s,1" title="Start one syllable later">start &rarr;</button>
+      <button data-n="e,-1" title="End one syllable earlier">&larr; end</button><button data-n="e,1" title="End one syllable later">end &rarr;</button>
+      ${sp.s !== sp.os || sp.e !== sp.oe ? `<button data-act="reset" title="Put the edges back where they started">Reset</button>` : ""}
+    </div>` : ""}`;
+  pop.querySelectorAll("[data-act]").forEach(b => b.onclick = () => ({accept, drop, edit: toggleEdit, reset: resetEdges})[b.dataset.act]());
   pop.querySelectorAll("[data-n]").forEach(b => b.onclick = () => { const [w, d] = b.dataset.n.split(","); nudge(w, +d); });
   pop.classList.remove("hidden");
 
@@ -384,9 +393,128 @@ function renderPop(){
   const r = last[last.length - 1];
   const box = $("textInner").getBoundingClientRect();
   const maxLeft = box.width - pop.offsetWidth;
-  pop.style.top = (r.bottom - box.top + 6) + "px";
+  pop.style.top = (r.bottom - box.top + 14) + "px";
   pop.style.left = Math.max(0, Math.min(r.left - box.left, maxLeft)) + "px";
+  positionHandles();
 }
+
+/* ---------- drag handles ---------- */
+// DOM position of a character offset on the current page
+function domPoint(off){
+  const kids = $("text").childNodes;
+  let lo = 0, hi = kids.length - 1;
+  while (lo < hi){ const m = (lo + hi + 1) >> 1; if (Number(kids[m].dataset.s) <= off) lo = m; else hi = m - 1; }
+  const el = kids[lo]; if (!el || !el.firstChild) return null;
+  return {node: el.firstChild, offset: Math.min(off - Number(el.dataset.s), el.firstChild.length)};
+}
+function charRect(off, which){
+  const p = domPoint(off); if (!p || p.offset >= p.node.length) return null;
+  const r = document.createRange(); r.setStart(p.node, p.offset); r.setEnd(p.node, p.offset + 1);
+  const rs = r.getClientRects(); if (!rs.length) return null;
+  return which === "first" ? rs[0] : rs[rs.length - 1];
+}
+function positionHandles(){
+  const hs = $("hStart"), he = $("hEnd"), sp = current();
+  if (!hs || !he) return;
+  hs.classList.add("hidden"); he.classList.add("hidden");
+  if (!sp || !S.editing || sp.status === "dropped") return;
+  const {s: ps, e: pe} = S.pages[S.page];
+  const box = $("textInner").getBoundingClientRect();
+  const place = (el, r, x) => {
+    const pad = r.height * 0.15;
+    el.style.left = (x - box.left) + "px";
+    el.style.top = (r.top - box.top - pad) + "px";
+    el.style.height = (r.height + 2 * pad) + "px";
+    el.classList.remove("hidden");
+  };
+  if (sp.s >= ps && sp.s < pe){ const r = charRect(sp.s, "first"); if (r) place(hs, r, r.left); }
+  if (sp.e - 1 >= ps && sp.e - 1 < pe){ const r = charRect(sp.e - 1, "last"); if (r) place(he, r, r.right); }
+}
+
+// Character offset under the mouse
+function offsetFromPoint(x, y){
+  let node = null, off = 0;
+  if (document.caretPositionFromPoint){ const c = document.caretPositionFromPoint(x, y); if (c){ node = c.offsetNode; off = c.offset; } }
+  else if (document.caretRangeFromPoint){ const c = document.caretRangeFromPoint(x, y); if (c){ node = c.startContainer; off = c.startOffset; } }
+  return node ? pointOffset(node, off) : null;
+}
+// Snap to whole syllables unless Alt is held
+function snapStart(p){
+  const T = S.text, L = T.length;
+  while (p > 0 && !isBreak(T[p - 1])) p--;
+  while (p < L && isBreak(T[p])) p++;
+  return p;
+}
+function snapEnd(p){
+  const T = S.text, L = T.length;
+  if (!(p > 0 && isBreak(T[p - 1]))) while (p < L && !isBreak(T[p])) p++;
+  while (p < L && isBreak(T[p]) && !isSpace(T[p])) p++;      // keep the tsheg / shad
+  while (p > 0 && isSpace(T[p - 1])) p--;
+  return p;
+}
+
+let drag = null;
+function startDrag(which, e){
+  const sp = current(); if (!sp) return;
+  e.preventDefault();
+  window.getSelection().removeAllRanges();
+  drag = {which, sp, before: {spans: S.spans.map(o => ({...o})), sel: S.sel}, s0: sp.s, e0: sp.e, raf: 0};
+  document.body.classList.add("dragging");
+  $(which === "s" ? "hStart" : "hEnd").classList.add("active");
+}
+function moveDrag(e){
+  if (!drag) return;
+  const off = offsetFromPoint(e.clientX, e.clientY);
+  if (off == null) return;
+  const sp = drag.sp;
+  if (drag.which === "s"){
+    const p = e.altKey ? off : snapStart(off);
+    if (p < sp.e && p !== sp.s) sp.s = p; else return;
+  } else {
+    const p = e.altKey ? off : snapEnd(off);
+    if (p > sp.s && p !== sp.e) sp.e = p; else return;
+  }
+  if (!drag.raf) drag.raf = requestAnimationFrame(() => { if (drag) drag.raf = 0; renderPage(); });
+}
+function endDrag(){
+  if (!drag) return;
+  const d = drag; drag = null;
+  document.body.classList.remove("dragging");
+  $("hStart").classList.remove("active"); $("hEnd").classList.remove("active");
+  if (d.sp.s !== d.s0 || d.sp.e !== d.e0){
+    S.hist.push(d.before); if (S.hist.length > 200) S.hist.shift();
+    if (!d.sp.isNew) d.sp.status = "edited";
+    const notes = resolveOverlaps(d.sp);
+    S.dirty = true; rebuildIndex(); refreshAll(); scheduleSave(); warnOverlap(notes);
+  } else renderPage();
+}
+on("hStart", "pointerdown", e => startDrag("s", e));
+on("hEnd", "pointerdown", e => startDrag("e", e));
+document.addEventListener("pointermove", moveDrag);
+document.addEventListener("pointerup", endDrag);
+document.addEventListener("pointercancel", endDrag);
+
+/* ---------- "+ Add" button next to selected text ---------- */
+function renderAddPop(){
+  const ap = $("addPop");
+  if (!ap) return;
+  const o = drag ? null : selectionOffsets();
+  if (!o){ ap.classList.add("hidden"); return; }
+  const sp = current();
+  const editingSpan = sp && S.editing && sp.status !== "dropped";
+  ap.innerHTML = `<div class="row">${editingSpan ? `<button data-act="use">Set as this span's text</button>` : ""}<button class="add-btn" data-act="add">+ Add as new span <kbd>N</kbd></button></div>`;
+  ap.querySelector('[data-act="add"]').onclick = addFromSelection;
+  const u = ap.querySelector('[data-act="use"]'); if (u) u.onclick = useSelection;
+  const rs = window.getSelection().getRangeAt(0).getClientRects();
+  const r = rs[rs.length - 1];
+  const box = $("textInner").getBoundingClientRect();
+  ap.classList.remove("hidden");
+  ap.style.top = (r.bottom - box.top + 10) + "px";
+  ap.style.left = Math.max(0, Math.min(r.right - box.left - ap.offsetWidth / 2, box.width - ap.offsetWidth)) + "px";
+}
+on("textWrap", "mouseup", () => setTimeout(renderAddPop, 0));
+on("textWrap", "keyup", () => setTimeout(renderAddPop, 0));
+on("addPop", "mousedown", e => e.preventDefault());   // keep the text selection when clicking the button
 
 function refreshAll(){ renderPage(); renderPageList(); renderProgress(); renderChanges(); }
 
@@ -424,21 +552,72 @@ function accept(){
 }
 function drop(){
   const sp = current(); if (!sp){ msg("Click a span first."); return; }
-  if (sp.status === "dropped"){ change(() => { sp.status = sp.prev || "todo"; }); msg("Span restored."); return; }
+  if (sp.status === "dropped"){ let notes = []; change(() => { sp.status = sp.prev || "todo"; notes = resolveOverlaps(sp); }); msg("Span restored."); warnOverlap(notes); return; }
   if (sp.isNew){ change(() => { S.spans = S.spans.filter(x => x !== sp); S.sel = null; }); msg("Added span removed."); nextUnchecked(true); return; }
   change(() => { sp.prev = sp.status; sp.status = "dropped"; });
   nextUnchecked(true);
 }
 function toggleEdit(){ const sp = current(); if (!sp || sp.status === "dropped") return; S.editing = !S.editing; renderPop(); }
 
+/* ---------- overlaps: the span you just made or changed wins ----------
+ * Any other (not dropped) span that overlaps it is changed to fit:
+ *   - partly overlapping      -> the older span is shortened
+ *   - completely inside it    -> the older span is dropped
+ *   - it sits inside an older span -> the older span is split into two parts around it
+ */
+function trimSpace(x){ const T = S.text; while (x.s < x.e && isSpace(T[x.s])) x.s++; while (x.e > x.s && isSpace(T[x.e - 1])) x.e--; }
+function snip(x){ const t = S.text.slice(x.s, x.e); return t.length > 14 ? t.slice(0, 14) + "…" : t; }
+function resolveOverlaps(w){
+  const notes = [];
+  if (!w || w.status === "dropped") return notes;
+  for (const o of [...S.spans]){
+    if (o === w || o.status === "dropped" || o.e <= w.s || o.s >= w.e) continue;
+    const label = snip(o);
+    const dropIt = () => { if (o.isNew) S.spans = S.spans.filter(x => x !== o); else { o.prev = o.status; o.status = "dropped"; } };
+    if (o.s >= w.s && o.e <= w.e){ dropIt(); notes.push(`dropped “${label}” because it was completely inside`); continue; }
+    if (o.s < w.s && o.e > w.e){
+      const right = {id: newId(), s: w.e, e: o.e, status: "added", isNew: true};
+      o.e = w.s; trimSpace(o); trimSpace(right);
+      right.os = right.s; right.oe = right.e;
+      if (right.e > right.s) S.spans.push(right);
+      if (o.e > o.s){ if (!o.isNew) o.status = "edited"; } else dropIt();
+      notes.push(`split “${label}” into two parts around it`); continue;
+    }
+    if (o.s < w.s) o.e = w.s; else o.s = w.e;
+    trimSpace(o);
+    if (o.e > o.s){ if (!o.isNew) o.status = "edited"; notes.push(`shortened “${label}” so they no longer overlap`); }
+    else { dropIt(); notes.push(`dropped “${label}” because nothing was left of it`); }
+  }
+  return notes;
+}
+let toastTimer = null;
+function toast(html, buttons){
+  const t = $("toast"); if (!t){ msg(html.replace(/<[^>]+>/g, "")); return; }
+  t.innerHTML = `<span class="grow">${html}</span>` + (buttons || []).map((b, i) => `<button class="small" data-i="${i}">${b.label}</button>`).join("") + `<button class="small" data-close>✕</button>`;
+  (buttons || []).forEach((b, i) => t.querySelector(`[data-i="${i}"]`).onclick = () => { t.classList.add("hidden"); b.fn(); });
+  t.querySelector("[data-close]").onclick = () => t.classList.add("hidden");
+  t.classList.remove("hidden");
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add("hidden"), 12000);
+}
+function warnOverlap(notes){
+  if (!notes.length) return;
+  toast(`⚠ This span overlapped ${notes.length === 1 ? "another span" : notes.length + " other spans"}. The newest one wins: ${esc(notes.join("; "))}.`, [{label: "Undo", fn: undo}]);
+}
+function overlapPairs(){
+  const list = sorted().filter(x => x.status !== "dropped"); let n = 0, first = null, maxEnd = -1, maxSpan = null;
+  for (const x of list){ if (x.s < maxEnd){ n++; if (!first) first = x; } if (x.e > maxEnd){ maxEnd = x.e; maxSpan = x; } }
+  return {n, first};
+}
+
 function setBounds(sp, s, e){
   if (!(s >= 0 && e <= S.text.length && e > s)){ msg("A span can't be empty."); return false; }
   const keep = S.editing;
-  change(() => { sp.s = s; sp.e = e; if (!sp.isNew) sp.status = "edited"; });
+  let notes = [];
+  change(() => { sp.s = s; sp.e = e; if (!sp.isNew) sp.status = "edited"; notes = resolveOverlaps(sp); });
   S.editing = keep; renderPop();
-  msg(""); return true;
+  msg(""); warnOverlap(notes); return true;
 }
-function resetEdges(){ const sp = current(); if (!sp) return; const keep = S.editing; change(() => { sp.s = sp.os; sp.e = sp.oe; sp.status = sp.isNew ? "added" : "accepted"; }); S.editing = keep; renderPop(); }
+function resetEdges(){ const sp = current(); if (!sp) return; const keep = S.editing; let notes = []; change(() => { sp.s = sp.os; sp.e = sp.oe; sp.status = sp.isNew ? "added" : "accepted"; notes = resolveOverlaps(sp); }); S.editing = keep; renderPop(); warnOverlap(notes); }
 
 // Move a span edge by one syllable (tsheg / shad / space aware)
 function nudge(which, dir){
@@ -498,14 +677,16 @@ function addFromSelection(){
   const o = selectionOffsets();
   if (!o){ msg("Select some text in the book first."); return; }
   const id = newId();
-  change(() => { S.spans.push({id, s: o.s, e: o.e, os: o.s, oe: o.e, status: "added", isNew: true}); S.sel = id; });
-  window.getSelection().removeAllRanges(); updateSelInfo(); msg("New span added.");
+  let notes = [];
+  change(() => { const sp = {id, s: o.s, e: o.e, os: o.s, oe: o.e, status: "added", isNew: true}; S.spans.push(sp); S.sel = id; notes = resolveOverlaps(sp); });
+  warnOverlap(notes);
+  window.getSelection().removeAllRanges(); updateSelInfo(); renderAddPop(); S.editing = false; renderPop(); msg("New span added. Press E to adjust its edges.");
 }
 function useSelection(){
   const sp = current(); const o = selectionOffsets();
   if (!sp) return;
   if (!o){ msg("Select the right text in the book, then click this again."); return; }
-  if (setBounds(sp, o.s, o.e)){ window.getSelection().removeAllRanges(); updateSelInfo(); }
+  if (setBounds(sp, o.s, o.e)){ window.getSelection().removeAllRanges(); updateSelInfo(); renderAddPop(); }
 }
 
 function nextUnchecked(quiet){
@@ -600,7 +781,6 @@ function exportYaml(){
    WIRING
    ================================================================= */
 $("exportBtn").onclick = exportYaml;
-$("addBtn").onclick = addFromSelection;
 $("nextBtn").onclick = () => nextUnchecked(false);
 $("prevBtn").onclick = prevSpan;
 $("undoBtn").onclick = undo;
@@ -613,12 +793,20 @@ $("text").addEventListener("click", e => {
   const el = e.target.closest("[data-id]");
   if (el) select(el.dataset.id, false);
 });
+$("text").addEventListener("dblclick", e => {
+  const el = e.target.closest("[data-id]");
+  if (!el) return;
+  window.getSelection().removeAllRanges();
+  select(el.dataset.id, false);
+  const sp = current(); if (sp && sp.status !== "dropped"){ S.editing = true; renderPop(); }
+});
 function updateSelInfo(){
   const o = selectionOffsets();
-  $("selInfo").textContent = o ? `${o.e - o.s} characters selected (${o.s}–${o.e - 1}).` : "Select text in the book first.";
+  $("selInfo").textContent = o ? `${o.e - o.s} characters selected (${o.s}–${o.e - 1}). Use the "+ Add" button next to it.` : 'Select text in the book with the mouse. A "+ Add" button appears next to it.';
+  if (!o && $("addPop")) $("addPop").classList.add("hidden");
 }
 document.addEventListener("selectionchange", () => { if (!$("review").classList.contains("hidden")) updateSelInfo(); });
-window.addEventListener("resize", () => { if (!$("review").classList.contains("hidden")) renderPop(); });
+window.addEventListener("resize", () => { if (!$("review").classList.contains("hidden")){ renderPop(); renderAddPop(); } });
 
 document.addEventListener("keydown", e => {
   if ($("review").classList.contains("hidden")) return;
