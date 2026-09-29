@@ -13,7 +13,7 @@
 
 <!-- ============ SCREEN 1 · UPLOAD ============ -->
 <section id="upload">
-  <div class="card">
+  <div>
     <h1>Annotation review</h1>
 
     <label for="annotation" class="field-label">Choose annotation</label>
@@ -47,6 +47,7 @@
     <span class="muted small" id="saveState"></span>
     <button class="primary" id="exportBtn">Export yaml file</button>
   </header>
+  <div id="toast" class="hidden" role="status"></div>
   <div id="banner" class="hidden">
     <span id="bannerText"></span>
     <button class="small" id="resumeBtn">Resume it</button>
@@ -58,7 +59,10 @@
     <div id="textWrap">
       <div id="textInner">
         <div id="text" class="tib"></div>
-        <div id="pop" class="hidden"></div>
+        <div id="pop" class="float hidden"></div>
+        <div id="addPop" class="float hidden"><button class="add-btn" id="addPopBtn">+ Add as new span <kbd>N</kbd></button></div>
+        <div class="handle start hidden" id="hStart" title="Drag to move the start"></div>
+        <div class="handle end hidden" id="hEnd" title="Drag to move the end"></div>
       </div>
       <div id="pageNav">
         <button class="small" id="prevPage">&larr; Prev page</button>
@@ -68,33 +72,32 @@
     </div>
 
     <aside id="side">
-      <div class="box">
+      <section>
         <h3>Add a missed span</h3>
-        <div class="muted small" id="selInfo">Select text in the book first.</div>
-        <button class="add wide" id="addBtn">+ Add selected text <kbd>N</kbd></button>
-      </div>
+        <div class="muted small" id="selInfo">Select text in the book with the mouse. A "+ Add" button appears next to it.</div>
+      </section>
 
-      <div class="box">
-        <h3>Your changes <span class="muted" id="changeCount"></span></h3>
-        <div id="changes"></div>
-      </div>
-
-      <div class="box">
+      <section>
         <div class="row">
           <button id="nextBtn" class="grow">Next unchecked <kbd>J</kbd></button>
           <button id="prevBtn">Prev <kbd>K</kbd></button>
           <button id="undoBtn">Undo</button>
         </div>
         <div id="msg" class="muted small"></div>
-      </div>
+      </section>
 
-      <div class="legend">
-        <span class="badge st-todo">not checked</span>
-        <span class="badge st-accepted">accepted</span>
-        <span class="badge st-edited">edited</span>
-        <span class="badge st-dropped">dropped</span>
-        <span class="badge st-added">added</span>
-      </div>
+      <section>
+        <h3>Your changes <span class="muted" id="changeCount"></span></h3>
+        <div id="changes"></div>
+      </section>
+
+      <section class="legend">
+        <span class="st-todo">not checked</span>
+        <span class="st-accepted">accepted</span>
+        <span class="st-edited">edited</span>
+        <span class="st-dropped" style="text-decoration:none">dropped</span>
+        <span class="st-added">added</span>
+      </section>
     </aside>
   </main>
 </section>
