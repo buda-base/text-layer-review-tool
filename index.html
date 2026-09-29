@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Text Format Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Serif+Tibetan:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+<script src="vendor/js-yaml.min.js"></script>
+</head>
+<body>
+
+<!-- ============ SCREEN 1 · UPLOAD ============ -->
+<section id="upload">
+  <div class="card">
+    <h1>Annotation review</h1>
+
+    <label for="annotation" class="field-label">Choose annotation</label>
+    <select id="annotation"></select>
+
+    <div class="drop" id="dropFolder" tabindex="0" role="button">
+      <div class="drop-title">Add OPF folder</div>
+      <div class="muted small">Pick the book folder, for example <b>P000123.opf</b> or the repo folder <b>P000123</b>. The base .txt and the annotation .yml are found inside it.</div>
+    </div>
+    <input type="file" id="folderInput" webkitdirectory directory multiple class="hidden">
+
+    <div class="drop" id="dropYaml" tabindex="0" role="button">
+      <div class="drop-title">Add annotation .yaml <span class="muted">(optional)</span></div>
+      <div class="muted small">Only to continue an earlier review: add the file you exported last time, for example <b>P000123-tsawa.yaml</b>.</div>
+    </div>
+    <input type="file" id="yamlInput" accept=".yml,.yaml" class="hidden">
+
+    <ul class="checks" id="checks"></ul>
+    <button class="primary wide" id="openBtn">Open book</button>
+  </div>
+  <p class="muted small center">Your files stay on your computer. Nothing is uploaded anywhere.</p>
+</section>
+
+<!-- ============ SCREEN 2 · REVIEW ============ -->
+<section id="review" class="hidden">
+  <header>
+    <button class="small" id="closeBtn">&larr; Close</button>
+    <span class="title" id="bookTitle"></span>
+    <span class="muted small" id="progressText"></span>
+    <span class="grow"></span>
+    <span class="muted small" id="saveState"></span>
+    <button class="primary" id="exportBtn">Export yaml file</button>
+  </header>
+  <div id="banner" class="hidden">
+    <span id="bannerText"></span>
+    <button class="small" id="resumeBtn">Resume it</button>
+    <button class="small" id="ignoreBtn">Ignore</button>
+  </div>
+  <main>
+    <nav id="pages" aria-label="Pages"></nav>
+
+    <div id="textWrap">
+      <div id="textInner">
+        <div id="text" class="tib"></div>
+        <div id="pop" class="hidden"></div>
+      </div>
+      <div id="pageNav">
+        <button class="small" id="prevPage">&larr; Prev page</button>
+        <span class="muted small" id="pageLabel"></span>
+        <button class="small" id="nextPage">Next page &rarr;</button>
+      </div>
+    </div>
+
+    <aside id="side">
+      <div class="box">
+        <h3>Add a missed span</h3>
+        <div class="muted small" id="selInfo">Select text in the book first.</div>
+        <button class="add wide" id="addBtn">+ Add selected text <kbd>N</kbd></button>
+      </div>
+
+      <div class="box">
+        <h3>Your changes <span class="muted" id="changeCount"></span></h3>
+        <div id="changes"></div>
+      </div>
+
+      <div class="box">
+        <div class="row">
+          <button id="nextBtn" class="grow">Next unchecked <kbd>J</kbd></button>
+          <button id="prevBtn">Prev <kbd>K</kbd></button>
+          <button id="undoBtn">Undo</button>
+        </div>
+        <div id="msg" class="muted small"></div>
+      </div>
+
+      <div class="legend">
+        <span class="badge st-todo">not checked</span>
+        <span class="badge st-accepted">accepted</span>
+        <span class="badge st-edited">edited</span>
+        <span class="badge st-dropped">dropped</span>
+        <span class="badge st-added">added</span>
+      </div>
+    </aside>
+  </main>
+</section>
+
+<script src="app.js"></script>
+</body>
+</html>
