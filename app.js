@@ -228,9 +228,10 @@ function parseSpans(layer){
     const se = readSE(ann); if (!se) continue;
     const s = se[0], e = se[1] + 1;
     const rv = ann.review;
-    const status = (rv === "accepted" || rv === "edited" || rv === "added") ? rv : "todo";
+    let status = (rv === "accepted" || rv === "edited" || rv === "added") ? rv : "todo";
+    if ((rv === "edited" || rv === "added") && ann.confirmed === true) status = "accepted";
     if (s < 0 || e > L || e <= s) bad++;
-    S.spans.push({id, s, e, os: s, oe: e, status, isNew: rv === "added"});
+    S.spans.push({id, s, e, os: s, oe: e, status, isNew: rv === "added", edited: rv === "edited", editedBefore: rv === "edited"});
   }
   const rev = (layer.review && typeof layer.review === "object") ? layer.review : null;
   if (rev && Array.isArray(rev.dropped)){
@@ -272,8 +273,15 @@ function startReview(){
   } else $("banner").classList.add("hidden");
   $("saveState").textContent = "";
   refreshAll();
-  const first = sorted().find(x => x.status === "todo");
+  // Always open at a span: the first unchecked one, or the very first span if all were reviewed before
+  const list = sorted();
+  const first = list.find(x => x.status === "todo") || list.find(x => x.status !== "dropped") || list[0];
   if (first) select(first.id, true);
+  const orig = S.spans.filter(x => !x.isNew);
+  if (orig.length && orig.every(x => x.status !== "todo")){
+    toast(`All ${orig.length} spans in this file were already reviewed. They keep their colours, and you can go through them again: <b>J</b> / <b>K</b> move span by span, and Accept, Drop or Edit work as before.`,
+      [{label: "Mark all as not checked", fn: restartReview}]);
+  }
   const ov = overlapPairs();
   if (ov.n) toast(`⚠ ${ov.n} span${ov.n > 1 ? "s overlap" : " overlaps"} another span in this file (wavy red underline). Edit or drop one of them: the one you change wins and the other is fitted around it.`, [{label: "Show first", fn: () => select(ov.first.id, true)}]);
 }
@@ -347,15 +355,18 @@ function renderProgress(){
   $("progressText").textContent = `${checked} / ${orig.length} checked`;
 }
 
+function statusLabel(sp){ return sp.status === "accepted" && (sp.isNew || sp.edited) ? (sp.isNew ? "added" : "edited") + " · accepted" : LABEL[sp.status]; }
 const LABEL = {todo: "not checked", accepted: "accepted", edited: "edited", added: "added", dropped: "dropped"};
 function renderChanges(){
-  const ch = sorted().filter(x => x.status === "edited" || x.status === "added" || x.status === "dropped");
+  const ch = sorted().filter(x => x.status === "dropped" || x.isNew || x.edited);
   $("changeCount").textContent = `(${ch.length})`;
   const c = $("changes"); c.replaceChildren();
   if (!ch.length){ c.innerHTML = `<span class="muted">Nothing changed yet.</span>`; return; }
   for (const x of ch){
     const d = document.createElement("div");
-    d.innerHTML = `<span class="tag st-${x.status}">${LABEL[x.status]}</span><span class="tib"></span>`;
+    const kind = x.status === "dropped" ? "dropped" : x.isNew ? "added" : "edited";
+    const ok = x.status === "accepted";
+    d.innerHTML = `<span class="tag st-${ok ? "accepted" : kind}">${kind}${ok ? " ✓" : ""}</span><span class="tib"></span>`;
     d.lastChild.textContent = S.text.slice(x.s, Math.min(x.e, x.s + 30)) + (x.e - x.s > 30 ? "…" : "");
     d.onclick = () => select(x.id, true);
     c.append(d);
@@ -375,7 +386,7 @@ function renderPop(){
       ${dropped ? "" : `<button class="accept" data-act="accept">✓ Accept <kbd>A</kbd></button>`}
       <button class="drop-btn" data-act="drop">${dropped ? "Restore" : "Drop"} <kbd>D</kbd></button>
       ${dropped ? "" : `<button data-act="edit">${S.editing ? "✓ Done editing" : "Edit"} <kbd>E</kbd></button>`}
-      <span class="tag st-${sp.status}">${LABEL[sp.status]}</span>
+      <span class="tag st-${sp.status}">${statusLabel(sp)}</span>
     </div>
     ${S.editing && !dropped ? `
     <div class="hint">Drag the blue handles at the start and end of the span. Hold Alt (Option) while dragging to move by single letters.</div>
@@ -483,7 +494,7 @@ function endDrag(){
   $("hStart").classList.remove("active"); $("hEnd").classList.remove("active");
   if (d.sp.s !== d.s0 || d.sp.e !== d.e0){
     S.hist.push(d.before); if (S.hist.length > 200) S.hist.shift();
-    if (!d.sp.isNew) d.sp.status = "edited";
+    markChanged(d.sp);
     const notes = resolveOverlaps(d.sp);
     S.dirty = true; rebuildIndex(); refreshAll(); scheduleSave(); warnOverlap(notes);
   } else renderPage();
@@ -544,10 +555,17 @@ function undo(){
   refreshAll(); scheduleSave(); msg("Undone.");
 }
 
+// A span keeps two things apart:
+//   status  -> its colour: todo, accepted, edited, added, dropped
+//   edited / isNew -> what was changed, so the export still says "edited" or "added" after you accept it
+function markChanged(sp){ if (!sp.isNew) sp.edited = true; sp.status = sp.isNew ? "added" : "edited"; }
+function changedStatus(sp){ return sp.isNew ? "added" : sp.edited ? "edited" : "todo"; }
+
 function accept(){
   const sp = current(); if (!sp){ msg("Click a span first."); return; }
   if (sp.status === "dropped") return;
-  if (sp.status === "todo") change(() => { sp.status = "accepted"; });
+  S.editing = false;
+  if (sp.status !== "accepted") change(() => { sp.status = "accepted"; });
   nextUnchecked(true);
 }
 function drop(){
@@ -580,12 +598,12 @@ function resolveOverlaps(w){
       o.e = w.s; trimSpace(o); trimSpace(right);
       right.os = right.s; right.oe = right.e;
       if (right.e > right.s) S.spans.push(right);
-      if (o.e > o.s){ if (!o.isNew) o.status = "edited"; } else dropIt();
+      if (o.e > o.s) markChanged(o); else dropIt();
       notes.push(`split “${label}” into two parts around it`); continue;
     }
     if (o.s < w.s) o.e = w.s; else o.s = w.e;
     trimSpace(o);
-    if (o.e > o.s){ if (!o.isNew) o.status = "edited"; notes.push(`shortened “${label}” so they no longer overlap`); }
+    if (o.e > o.s){ markChanged(o); notes.push(`shortened “${label}” so they no longer overlap`); }
     else { dropIt(); notes.push(`dropped “${label}” because nothing was left of it`); }
   }
   return notes;
@@ -613,11 +631,11 @@ function setBounds(sp, s, e){
   if (!(s >= 0 && e <= S.text.length && e > s)){ msg("A span can't be empty."); return false; }
   const keep = S.editing;
   let notes = [];
-  change(() => { sp.s = s; sp.e = e; if (!sp.isNew) sp.status = "edited"; notes = resolveOverlaps(sp); });
+  change(() => { sp.s = s; sp.e = e; markChanged(sp); notes = resolveOverlaps(sp); });
   S.editing = keep; renderPop();
   msg(""); warnOverlap(notes); return true;
 }
-function resetEdges(){ const sp = current(); if (!sp) return; const keep = S.editing; let notes = []; change(() => { sp.s = sp.os; sp.e = sp.oe; sp.status = sp.isNew ? "added" : "accepted"; notes = resolveOverlaps(sp); }); S.editing = keep; renderPop(); warnOverlap(notes); }
+function resetEdges(){ const sp = current(); if (!sp) return; const keep = S.editing; let notes = []; change(() => { sp.s = sp.os; sp.e = sp.oe; if (!sp.isNew){ sp.edited = !!sp.editedBefore; } sp.status = sp.isNew ? "added" : (sp.edited ? "edited" : "accepted"); notes = resolveOverlaps(sp); }); S.editing = keep; renderPop(); warnOverlap(notes); }
 
 // Move a span edge by one syllable (tsheg / shad / space aware)
 function nudge(which, dir){
@@ -689,13 +707,25 @@ function useSelection(){
   if (setBounds(sp, o.s, o.e)){ window.getSelection().removeAllRanges(); updateSelInfo(); renderAddPop(); }
 }
 
+// Put every accepted span back to "not checked" (edits, additions and drops stay). One undo reverses it.
+function restartReview(){
+  change(() => { for (const x of S.spans) if (x.status === "accepted") x.status = changedStatus(x); });
+  const first = sorted().find(x => x.status === "todo"); if (first) select(first.id, true);
+  msg("Accepted spans are marked as not checked again.");
+}
+function nextSpan(){
+  const list = sorted(); if (!list.length) return;
+  const cur = current(); const i = cur ? list.indexOf(cur) : -1;
+  if (i >= list.length - 1){ msg("That was the last span in the book."); return; }
+  select(list[i + 1].id, true);
+}
 function nextUnchecked(quiet){
   const list = sorted(), cur = current();
   const from = cur ? cur.s : S.pages[S.page].s - 1;
   let n = list.find(x => x.status === "todo" && (x.s > from || (cur && x.s === from && x.e > cur.e)));
   if (!n) n = list.find(x => x.status === "todo");
   if (n){ select(n.id, true); if (!quiet) msg(""); }
-  else { msg("Every span is checked. Export the yaml file."); renderPop(); }
+  else { msg("Every span is checked. Moving span by span — export the yaml file when you're done."); nextSpan(); }
 }
 function prevSpan(){
   const list = sorted(); if (!list.length) return;
@@ -724,9 +754,16 @@ function buildExport(){
   const setAnn = (ann, sp) => {
     const t = (ann.span && typeof ann.span === "object") ? ann.span : ann;
     t.start = sp.s; t.end = sp.e - 1;
-    if (sp.status === "todo") delete ann.review; else ann.review = sp.status;
+    delete ann.review; delete ann.confirmed;
+    Object.assign(ann, reviewFields(sp));
   };
-  const fresh = sp => Object.assign({span: {start: sp.s, end: sp.e - 1}}, sp.status === "todo" ? {} : {review: sp.status});
+  // review: what happened to the span. confirmed: an edited or added span that was then accepted.
+  const reviewFields = sp => {
+    const r = sp.isNew ? "added" : sp.edited ? "edited" : sp.status === "accepted" ? "accepted" : null;
+    if (!r) return {};
+    return (r !== "accepted" && sp.status === "accepted") ? {review: r, confirmed: true} : {review: r};
+  };
+  const fresh = sp => Object.assign({span: {start: sp.s, end: sp.e - 1}}, reviewFields(sp));
   const kept = new Set();
   if (Array.isArray(L.annotations)){
     const out = [];
@@ -761,8 +798,8 @@ function buildExport(){
     updated: new Date().toISOString(),
     checked: orig.filter(x => x.status !== "todo").length,
     total: orig.length,
-    accepted: orig.filter(x => x.status === "accepted").length,
-    edited: orig.filter(x => x.status === "edited").length,
+    accepted: orig.filter(x => x.status === "accepted" && !x.edited).length,
+    edited: orig.filter(x => x.edited && x.status !== "dropped").length,
     added: S.spans.filter(x => x.isNew).length,
     dropped: sorted().filter(x => x.status === "dropped").map(x => ({id: x.id, start: x.s, end: x.e - 1}))
   };
