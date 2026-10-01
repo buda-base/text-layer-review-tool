@@ -52,6 +52,10 @@ Span status is shown by text colour: blue = not checked, green = accepted,
 orange = edited, red struck through = dropped, purple = added. The selected span
 is underlined. A wavy red underline means two spans overlap.
 
+The whole book is one long scrolling text. The panel on the right lists every
+span you've reviewed so far (accepted, edited, added, dropped); click one to jump
+to it.
+
 ### Reviewing a file again
 
 The book always opens at a span: the first one not checked yet, or the very first
