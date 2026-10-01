@@ -47,16 +47,10 @@ h1{font-size:26px;font-weight:500;margin:0 0 20px}
 header{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 20px;border-bottom:1px solid var(--line)}
 header .title{font-weight:500;font-size:17px}
 #banner{padding:10px 20px;background:#fff4e0;color:#7a4100;display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-main{flex:1;display:grid;grid-template-columns:130px minmax(0,1fr) 280px;min-height:0}
-#pages{overflow:auto;padding:10px 6px}
-#pages button{display:flex;justify-content:space-between;align-items:center;width:100%;border:none;background:none;padding:4px 10px;font-size:13px;border-radius:6px;color:var(--muted)}
-#pages button.cur{background:var(--hover);color:var(--text);font-weight:500}
-#pages .n{font-size:12px;color:var(--c-todo)}
-#pages .done{color:var(--c-accepted)}
+main{flex:1;display:grid;grid-template-columns:minmax(0,1fr) 300px;min-height:0}
 #textWrap{overflow:auto;padding:28px 40px}
 #textInner{position:relative;max-width:900px;margin:0 auto}
 #text{white-space:pre-wrap;font-size:22px;line-height:2.3;word-break:break-word;color:var(--text)}
-#pageNav{display:flex;justify-content:space-between;align-items:center;max-width:900px;margin:24px auto 0}
 
 /* spans: colour only, no boxes */
 .ann{cursor:pointer}
@@ -102,12 +96,12 @@ main{flex:1;display:grid;grid-template-columns:130px minmax(0,1fr) 280px;min-hei
 .legend span::before{content:"● "}
 
 @media (max-width:900px){
-  main{grid-template-columns:1fr;grid-template-rows:auto 1fr auto}
-  #pages{display:flex;overflow-x:auto;border-bottom:1px solid var(--line)}
-  #pages button{width:auto;white-space:nowrap}
+  main{grid-template-columns:1fr;grid-template-rows:1fr auto}
   #side{border-top:1px solid var(--line);max-height:40vh}
   #textWrap{padding:16px}
 }
 body.dragging .float,body.dragging .handle{pointer-events:none}
 body.dragging .float{opacity:.25}
 #toast{display:flex;gap:10px;align-items:center;padding:10px 20px;background:#fff4e0;color:#7a4100;border-bottom:1px solid #f3d9a8;font-size:14px}
+#textWrap{padding-bottom:40vh}   /* room to scroll the last span to the middle */
+#changes div.cur{background:var(--hover)}

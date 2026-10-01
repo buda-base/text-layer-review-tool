@@ -16,7 +16,7 @@
 // The name must match the layer file name: <opf>/layers/<base>/<Name>.yml
 const ANNOTATIONS = ["Tsawa", "Yigchung"];
 
-const PAGE_SIZE = 6000;                       // characters per page (cut at a line break)
+const PAGE_SIZE = 6000;                       // the book is drawn in blocks of about this many characters (cut at a line break), all in one long scroll
 const BREAKS = new Set(["་","༌","།","༎","༑","༔"," ","\n","\r","\t"]);
 const isBreak = ch => BREAKS.has(ch);
 const isSpace = ch => /\s/.test(ch);
@@ -228,9 +228,10 @@ function parseSpans(layer){
     const se = readSE(ann); if (!se) continue;
     const s = se[0], e = se[1] + 1;
     const rv = ann.review;
-    const status = (rv === "accepted" || rv === "edited" || rv === "added") ? rv : "todo";
+    let status = (rv === "accepted" || rv === "edited" || rv === "added") ? rv : "todo";
+    if ((rv === "edited" || rv === "added") && ann.confirmed === true) status = "accepted";
     if (s < 0 || e > L || e <= s) bad++;
-    S.spans.push({id, s, e, os: s, oe: e, status, isNew: rv === "added"});
+    S.spans.push({id, s, e, os: s, oe: e, status, isNew: rv === "added", edited: rv === "edited", editedBefore: rv === "edited"});
   }
   const rev = (layer.review && typeof layer.review === "object") ? layer.review : null;
   if (rev && Array.isArray(rev.dropped)){
@@ -261,7 +262,7 @@ function pageOf(pos){
 
 function startReview(){
   S.key = `tfr:${S.opfId}:${S.annotation}:${S.text.length}:${S.spans.length}`;
-  S.hist = []; S.sel = null; S.editing = false; S.page = 0; S.dirty = false;
+  S.hist = []; S.sel = null; S.editing = false; S.dirty = false;
   rebuildIndex(); buildPages();
   $("bookTitle").textContent = `${S.opfId} · ${S.annotation}`;
   $("upload").classList.add("hidden"); $("review").classList.remove("hidden");
@@ -272,8 +273,15 @@ function startReview(){
   } else $("banner").classList.add("hidden");
   $("saveState").textContent = "";
   refreshAll();
-  const first = sorted().find(x => x.status === "todo");
+  // Always open at a span: the first unchecked one, or the very first span if all were reviewed before
+  const list = sorted();
+  const first = list.find(x => x.status === "todo") || list.find(x => x.status !== "dropped") || list[0];
   if (first) select(first.id, true);
+  const orig = S.spans.filter(x => !x.isNew);
+  if (orig.length && orig.every(x => x.status !== "todo")){
+    toast(`All ${orig.length} spans in this file were already reviewed. They keep their colours, and you can go through them again: <b>J</b> / <b>K</b> move span by span, and Accept, Drop or Edit work as before.`,
+      [{label: "Mark all as not checked", fn: restartReview}]);
+  }
   const ov = overlapPairs();
   if (ov.n) toast(`⚠ ${ov.n} span${ov.n > 1 ? "s overlap" : " overlaps"} another span in this file (wavy red underline). Edit or drop one of them: the one you change wins and the other is fitted around it.`, [{label: "Show first", fn: () => select(ov.first.id, true)}]);
 }
@@ -297,15 +305,18 @@ function current(){ return S.sel != null ? S.byId.get(S.sel) : null; }
 function msg(t){ $("msg").textContent = t || ""; }
 function esc(s){ return String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
 
-function renderPage(){
-  const {s: ps, e: pe} = S.pages[S.page];
+// The whole book is one long scrolling text. Internally it is drawn in blocks (S.pages) so that a
+// change only redraws the few blocks it touches instead of the whole book.
+function renderChunk(i){
+  const box = $("text").children[i]; if (!box) return;
+  const {s: ps, e: pe} = S.pages[i];
   const vis = S.spans.filter(x => x.s < pe && x.e > ps);
   const pts = new Set([ps, pe]);
   for (const x of vis){ if (x.s > ps && x.s < pe) pts.add(x.s); if (x.e > ps && x.e < pe) pts.add(x.e); }
   const arr = [...pts].sort((a, b) => a - b);
   const frag = document.createDocumentFragment();
-  for (let i = 0; i < arr.length - 1; i++){
-    const a = arr[i], b = arr[i + 1];
+  for (let k = 0; k < arr.length - 1; k++){
+    const a = arr[k], b = arr[k + 1];
     const el = document.createElement("span");
     el.dataset.s = a;
     el.textContent = S.text.slice(a, b);
@@ -319,27 +330,26 @@ function renderPage(){
     }
     frag.append(el);
   }
-  $("text").replaceChildren(frag);
-  $("pageLabel").textContent = `Page ${S.page + 1} of ${S.pages.length}`;
-  $("prevPage").disabled = S.page === 0;
-  $("nextPage").disabled = S.page === S.pages.length - 1;
+  box.replaceChildren(frag);
+}
+function renderAll(){
+  const root = $("text"), frag = document.createDocumentFragment();
+  S.pages.forEach((p, i) => { const d = document.createElement("div"); d.className = "chunk"; d.dataset.c = i; frag.append(d); });
+  root.replaceChildren(frag);
+  for (let i = 0; i < S.pages.length; i++) renderChunk(i);
   renderPop();
 }
-
-function renderPageList(){
-  const todo = new Array(S.pages.length).fill(0), any = new Array(S.pages.length).fill(0);
-  for (const x of S.spans){ const p = pageOf(x.s); any[p]++; if (x.status === "todo") todo[p]++; }
-  const nav = $("pages"); nav.replaceChildren();
-  S.pages.forEach((p, i) => {
-    const b = document.createElement("button");
-    b.className = i === S.page ? "cur" : "";
-    b.innerHTML = `<span>Page ${i + 1}</span>` + (any[i] ? (todo[i] ? `<span class="n">${todo[i]}</span>` : `<span class="n done">✓</span>`) : "");
-    b.onclick = () => goPage(i);
-    nav.append(b);
-  });
-  const cur = nav.children[S.page]; if (cur) cur.scrollIntoView({block: "nearest"});
+// Redraw only the blocks that cover the given character ranges [[s, e], ...]
+function renderRanges(ranges){
+  const done = new Set();
+  for (const [a, b] of ranges){
+    if (a == null) continue;
+    const i0 = pageOf(Math.max(0, a)), i1 = pageOf(Math.max(a, b - 1));
+    for (let i = i0; i <= i1; i++) if (!done.has(i)){ done.add(i); renderChunk(i); }
+  }
+  renderPop();
 }
-function goPage(i){ S.page = i; renderPage(); renderPageList(); $("textWrap").scrollTop = 0; }
+const rangeOf = x => x ? [x.s, x.e] : [null, null];
 
 function renderProgress(){
   const orig = S.spans.filter(x => !x.isNew);
@@ -347,15 +357,19 @@ function renderProgress(){
   $("progressText").textContent = `${checked} / ${orig.length} checked`;
 }
 
+function statusLabel(sp){ return sp.status === "accepted" && (sp.isNew || sp.edited) ? (sp.isNew ? "added" : "edited") + " · accepted" : LABEL[sp.status]; }
 const LABEL = {todo: "not checked", accepted: "accepted", edited: "edited", added: "added", dropped: "dropped"};
 function renderChanges(){
-  const ch = sorted().filter(x => x.status === "edited" || x.status === "added" || x.status === "dropped");
+  const ch = sorted().filter(x => x.status !== "todo" || x.isNew || x.edited);
   $("changeCount").textContent = `(${ch.length})`;
   const c = $("changes"); c.replaceChildren();
-  if (!ch.length){ c.innerHTML = `<span class="muted">Nothing changed yet.</span>`; return; }
+  if (!ch.length){ c.innerHTML = `<span class="muted">Nothing reviewed yet.</span>`; return; }
   for (const x of ch){
     const d = document.createElement("div");
-    d.innerHTML = `<span class="tag st-${x.status}">${LABEL[x.status]}</span><span class="tib"></span>`;
+    const kind = x.status === "dropped" ? "dropped" : x.isNew ? "added" : x.edited ? "edited" : "accepted";
+    const ok = x.status === "accepted" && kind !== "accepted";
+    d.innerHTML = `<span class="tag st-${x.status === "accepted" ? "accepted" : kind}">${kind}${ok ? " ✓" : ""}</span><span class="tib"></span>`;
+    if (x.id === S.sel) d.classList.add("cur");
     d.lastChild.textContent = S.text.slice(x.s, Math.min(x.e, x.s + 30)) + (x.e - x.s > 30 ? "…" : "");
     d.onclick = () => select(x.id, true);
     c.append(d);
@@ -375,7 +389,7 @@ function renderPop(){
       ${dropped ? "" : `<button class="accept" data-act="accept">✓ Accept <kbd>A</kbd></button>`}
       <button class="drop-btn" data-act="drop">${dropped ? "Restore" : "Drop"} <kbd>D</kbd></button>
       ${dropped ? "" : `<button data-act="edit">${S.editing ? "✓ Done editing" : "Edit"} <kbd>E</kbd></button>`}
-      <span class="tag st-${sp.status}">${LABEL[sp.status]}</span>
+      <span class="tag st-${sp.status}">${statusLabel(sp)}</span>
     </div>
     ${S.editing && !dropped ? `
     <div class="hint">Drag the blue handles at the start and end of the span. Hold Alt (Option) while dragging to move by single letters.</div>
@@ -399,9 +413,11 @@ function renderPop(){
 }
 
 /* ---------- drag handles ---------- */
-// DOM position of a character offset on the current page
+// DOM position of a character offset
 function domPoint(off){
-  const kids = $("text").childNodes;
+  if (off < 0 || off >= S.text.length) return null;
+  const chunk = $("text").children[pageOf(off)]; if (!chunk) return null;
+  const kids = chunk.childNodes;
   let lo = 0, hi = kids.length - 1;
   while (lo < hi){ const m = (lo + hi + 1) >> 1; if (Number(kids[m].dataset.s) <= off) lo = m; else hi = m - 1; }
   const el = kids[lo]; if (!el || !el.firstChild) return null;
@@ -418,7 +434,6 @@ function positionHandles(){
   if (!hs || !he) return;
   hs.classList.add("hidden"); he.classList.add("hidden");
   if (!sp || !S.editing || sp.status === "dropped") return;
-  const {s: ps, e: pe} = S.pages[S.page];
   const box = $("textInner").getBoundingClientRect();
   const place = (el, r, x) => {
     const pad = r.height * 0.15;
@@ -427,8 +442,8 @@ function positionHandles(){
     el.style.height = (r.height + 2 * pad) + "px";
     el.classList.remove("hidden");
   };
-  if (sp.s >= ps && sp.s < pe){ const r = charRect(sp.s, "first"); if (r) place(hs, r, r.left); }
-  if (sp.e - 1 >= ps && sp.e - 1 < pe){ const r = charRect(sp.e - 1, "last"); if (r) place(he, r, r.right); }
+  { const r = charRect(sp.s, "first"); if (r) place(hs, r, r.left); }
+  { const r = charRect(sp.e - 1, "last"); if (r) place(he, r, r.right); }
 }
 
 // Character offset under the mouse
@@ -466,7 +481,7 @@ function moveDrag(e){
   if (!drag) return;
   const off = offsetFromPoint(e.clientX, e.clientY);
   if (off == null) return;
-  const sp = drag.sp;
+  const sp = drag.sp, s0 = sp.s, e0 = sp.e;
   if (drag.which === "s"){
     const p = e.altKey ? off : snapStart(off);
     if (p < sp.e && p !== sp.s) sp.s = p; else return;
@@ -474,7 +489,8 @@ function moveDrag(e){
     const p = e.altKey ? off : snapEnd(off);
     if (p > sp.s && p !== sp.e) sp.e = p; else return;
   }
-  if (!drag.raf) drag.raf = requestAnimationFrame(() => { if (drag) drag.raf = 0; renderPage(); });
+  drag.lo = Math.min(drag.lo ?? s0, s0, sp.s); drag.hi = Math.max(drag.hi ?? e0, e0, sp.e);
+  if (!drag.raf) drag.raf = requestAnimationFrame(() => { if (!drag) return; drag.raf = 0; renderRanges([[drag.lo, drag.hi]]); drag.lo = sp.s; drag.hi = sp.e; });
 }
 function endDrag(){
   if (!drag) return;
@@ -483,10 +499,10 @@ function endDrag(){
   $("hStart").classList.remove("active"); $("hEnd").classList.remove("active");
   if (d.sp.s !== d.s0 || d.sp.e !== d.e0){
     S.hist.push(d.before); if (S.hist.length > 200) S.hist.shift();
-    if (!d.sp.isNew) d.sp.status = "edited";
+    markChanged(d.sp);
     const notes = resolveOverlaps(d.sp);
     S.dirty = true; rebuildIndex(); refreshAll(); scheduleSave(); warnOverlap(notes);
-  } else renderPage();
+  } else renderPop();
 }
 on("hStart", "pointerdown", e => startDrag("s", e));
 on("hEnd", "pointerdown", e => startDrag("e", e));
@@ -516,13 +532,13 @@ on("textWrap", "mouseup", () => setTimeout(renderAddPop, 0));
 on("textWrap", "keyup", () => setTimeout(renderAddPop, 0));
 on("addPop", "mousedown", e => e.preventDefault());   // keep the text selection when clicking the button
 
-function refreshAll(){ renderPage(); renderPageList(); renderProgress(); renderChanges(); }
+function refreshAll(){ renderAll(); renderProgress(); renderChanges(); }
 
 function select(id, scroll){
+  const old = current();
   S.sel = id; S.editing = false;
   const sp = S.byId.get(id);
-  if (sp){ const p = pageOf(sp.s); if (p !== S.page){ S.page = p; renderPageList(); } }
-  renderPage();
+  renderRanges([rangeOf(old), rangeOf(sp)]);
   if (scroll && sp){
     const el = $("text").querySelector(`[data-id="${CSS.escape(String(id))}"]`);
     if (el) el.scrollIntoView({block: "center", behavior: "smooth"});
@@ -533,10 +549,16 @@ function select(id, scroll){
    EDITING
    ================================================================= */
 function change(fn){
-  S.hist.push({spans: S.spans.map(o => ({...o})), sel: S.sel});
+  const before = {spans: S.spans.map(o => ({...o})), sel: S.sel};
+  S.hist.push(before);
   if (S.hist.length > 200) S.hist.shift();
   fn(); rebuildIndex(); S.dirty = true;
-  refreshAll(); scheduleSave();
+  // redraw the blocks around every span that moved, changed colour, appeared or disappeared
+  const ranges = [], prev = new Map(before.spans.map(o => [o.id, o]));
+  for (const x of S.spans){ const o = prev.get(x.id); if (!o || o.s !== x.s || o.e !== x.e || o.status !== x.status){ ranges.push([x.s, x.e]); if (o) ranges.push([o.s, o.e]); } prev.delete(x.id); }
+  for (const o of prev.values()) ranges.push([o.s, o.e]);
+  ranges.push(rangeOf(before.sel != null ? S.byId.get(before.sel) || prev.get(before.sel) : null), rangeOf(current()));
+  renderRanges(ranges); renderProgress(); renderChanges(); scheduleSave();
 }
 function undo(){
   const h = S.hist.pop(); if (!h){ msg("Nothing to undo."); return; }
@@ -544,10 +566,17 @@ function undo(){
   refreshAll(); scheduleSave(); msg("Undone.");
 }
 
+// A span keeps two things apart:
+//   status  -> its colour: todo, accepted, edited, added, dropped
+//   edited / isNew -> what was changed, so the export still says "edited" or "added" after you accept it
+function markChanged(sp){ if (!sp.isNew) sp.edited = true; sp.status = sp.isNew ? "added" : "edited"; }
+function changedStatus(sp){ return sp.isNew ? "added" : sp.edited ? "edited" : "todo"; }
+
 function accept(){
   const sp = current(); if (!sp){ msg("Click a span first."); return; }
   if (sp.status === "dropped") return;
-  if (sp.status === "todo") change(() => { sp.status = "accepted"; });
+  S.editing = false;
+  if (sp.status !== "accepted") change(() => { sp.status = "accepted"; });
   nextUnchecked(true);
 }
 function drop(){
@@ -580,12 +609,12 @@ function resolveOverlaps(w){
       o.e = w.s; trimSpace(o); trimSpace(right);
       right.os = right.s; right.oe = right.e;
       if (right.e > right.s) S.spans.push(right);
-      if (o.e > o.s){ if (!o.isNew) o.status = "edited"; } else dropIt();
+      if (o.e > o.s) markChanged(o); else dropIt();
       notes.push(`split “${label}” into two parts around it`); continue;
     }
     if (o.s < w.s) o.e = w.s; else o.s = w.e;
     trimSpace(o);
-    if (o.e > o.s){ if (!o.isNew) o.status = "edited"; notes.push(`shortened “${label}” so they no longer overlap`); }
+    if (o.e > o.s){ markChanged(o); notes.push(`shortened “${label}” so they no longer overlap`); }
     else { dropIt(); notes.push(`dropped “${label}” because nothing was left of it`); }
   }
   return notes;
@@ -613,11 +642,11 @@ function setBounds(sp, s, e){
   if (!(s >= 0 && e <= S.text.length && e > s)){ msg("A span can't be empty."); return false; }
   const keep = S.editing;
   let notes = [];
-  change(() => { sp.s = s; sp.e = e; if (!sp.isNew) sp.status = "edited"; notes = resolveOverlaps(sp); });
+  change(() => { sp.s = s; sp.e = e; markChanged(sp); notes = resolveOverlaps(sp); });
   S.editing = keep; renderPop();
   msg(""); warnOverlap(notes); return true;
 }
-function resetEdges(){ const sp = current(); if (!sp) return; const keep = S.editing; let notes = []; change(() => { sp.s = sp.os; sp.e = sp.oe; sp.status = sp.isNew ? "added" : "accepted"; notes = resolveOverlaps(sp); }); S.editing = keep; renderPop(); warnOverlap(notes); }
+function resetEdges(){ const sp = current(); if (!sp) return; const keep = S.editing; let notes = []; change(() => { sp.s = sp.os; sp.e = sp.oe; if (!sp.isNew){ sp.edited = !!sp.editedBefore; } sp.status = sp.isNew ? "added" : (sp.edited ? "edited" : "accepted"); notes = resolveOverlaps(sp); }); S.editing = keep; renderPop(); warnOverlap(notes); }
 
 // Move a span edge by one syllable (tsheg / shad / space aware)
 function nudge(which, dir){
@@ -652,8 +681,13 @@ function pointOffset(node, off){
   if (!root.contains(node)) return null;
   if (node.nodeType === 3) return Number(node.parentElement.dataset.s) + off;
   if (node === root){
-    if (off < root.childNodes.length) return Number(root.childNodes[off].dataset.s);
-    return S.pages[S.page].e;
+    if (off < root.children.length) return S.pages[off].s;
+    return S.text.length;
+  }
+  if (node.classList && node.classList.contains("chunk")){
+    const i = Number(node.dataset.c);
+    if (off < node.childNodes.length) return Number(node.childNodes[off].dataset.s);
+    return S.pages[i].e;
   }
   if (node.dataset && node.dataset.s != null) return Number(node.dataset.s) + (off > 0 ? node.textContent.length : 0);
   return null;
@@ -689,13 +723,25 @@ function useSelection(){
   if (setBounds(sp, o.s, o.e)){ window.getSelection().removeAllRanges(); updateSelInfo(); renderAddPop(); }
 }
 
+// Put every accepted span back to "not checked" (edits, additions and drops stay). One undo reverses it.
+function restartReview(){
+  change(() => { for (const x of S.spans) if (x.status === "accepted") x.status = changedStatus(x); });
+  const first = sorted().find(x => x.status === "todo"); if (first) select(first.id, true);
+  msg("Accepted spans are marked as not checked again.");
+}
+function nextSpan(){
+  const list = sorted(); if (!list.length) return;
+  const cur = current(); const i = cur ? list.indexOf(cur) : -1;
+  if (i >= list.length - 1){ msg("That was the last span in the book."); return; }
+  select(list[i + 1].id, true);
+}
 function nextUnchecked(quiet){
   const list = sorted(), cur = current();
-  const from = cur ? cur.s : S.pages[S.page].s - 1;
+  const from = cur ? cur.s : -1;
   let n = list.find(x => x.status === "todo" && (x.s > from || (cur && x.s === from && x.e > cur.e)));
   if (!n) n = list.find(x => x.status === "todo");
   if (n){ select(n.id, true); if (!quiet) msg(""); }
-  else { msg("Every span is checked. Export the yaml file."); renderPop(); }
+  else { msg("Every span is checked. Moving span by span — export the yaml file when you're done."); nextSpan(); }
 }
 function prevSpan(){
   const list = sorted(); if (!list.length) return;
@@ -724,9 +770,16 @@ function buildExport(){
   const setAnn = (ann, sp) => {
     const t = (ann.span && typeof ann.span === "object") ? ann.span : ann;
     t.start = sp.s; t.end = sp.e - 1;
-    if (sp.status === "todo") delete ann.review; else ann.review = sp.status;
+    delete ann.review; delete ann.confirmed;
+    Object.assign(ann, reviewFields(sp));
   };
-  const fresh = sp => Object.assign({span: {start: sp.s, end: sp.e - 1}}, sp.status === "todo" ? {} : {review: sp.status});
+  // review: what happened to the span. confirmed: an edited or added span that was then accepted.
+  const reviewFields = sp => {
+    const r = sp.isNew ? "added" : sp.edited ? "edited" : sp.status === "accepted" ? "accepted" : null;
+    if (!r) return {};
+    return (r !== "accepted" && sp.status === "accepted") ? {review: r, confirmed: true} : {review: r};
+  };
+  const fresh = sp => Object.assign({span: {start: sp.s, end: sp.e - 1}}, reviewFields(sp));
   const kept = new Set();
   if (Array.isArray(L.annotations)){
     const out = [];
@@ -761,8 +814,8 @@ function buildExport(){
     updated: new Date().toISOString(),
     checked: orig.filter(x => x.status !== "todo").length,
     total: orig.length,
-    accepted: orig.filter(x => x.status === "accepted").length,
-    edited: orig.filter(x => x.status === "edited").length,
+    accepted: orig.filter(x => x.status === "accepted" && !x.edited).length,
+    edited: orig.filter(x => x.edited && x.status !== "dropped").length,
     added: S.spans.filter(x => x.isNew).length,
     dropped: sorted().filter(x => x.status === "dropped").map(x => ({id: x.id, start: x.s, end: x.e - 1}))
   };
@@ -784,8 +837,6 @@ $("exportBtn").onclick = exportYaml;
 $("nextBtn").onclick = () => nextUnchecked(false);
 $("prevBtn").onclick = prevSpan;
 $("undoBtn").onclick = undo;
-$("prevPage").onclick = () => { if (S.page > 0) goPage(S.page - 1); };
-$("nextPage").onclick = () => { if (S.page < S.pages.length - 1) goPage(S.page + 1); };
 
 $("text").addEventListener("click", e => {
   const sel = window.getSelection();
@@ -816,7 +867,7 @@ document.addEventListener("keydown", e => {
   if (e.ctrlKey || e.metaKey || e.altKey) return;
   const map = {a: accept, d: drop, e: toggleEdit, j: () => nextUnchecked(false), k: prevSpan, n: addFromSelection};
   if (map[k]){ e.preventDefault(); map[k](); }
-  else if (k === "escape"){ S.sel = null; S.editing = false; renderPage(); }
+  else if (k === "escape"){ const old = current(); S.sel = null; S.editing = false; renderRanges([rangeOf(old)]); }
 });
 window.addEventListener("beforeunload", e => { if (S.dirty){ e.preventDefault(); e.returnValue = ""; } });
 

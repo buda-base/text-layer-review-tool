@@ -52,6 +52,19 @@ Span status is shown by text colour: blue = not checked, green = accepted,
 orange = edited, red struck through = dropped, purple = added. The selected span
 is underlined. A wavy red underline means two spans overlap.
 
+The whole book is one long scrolling text. The panel on the right lists every
+span you've reviewed so far (accepted, edited, added, dropped); click one to jump
+to it.
+
+### Reviewing a file again
+
+The book always opens at a span: the first one not checked yet, or the very first
+span if everything was already reviewed. Re-opening an exported file keeps every
+span's colour (accepted, edited, added, dropped), and you can go through them again
+with `J` / `K`; Accept, Drop and Edit work as before. To start the review from
+scratch, press **Mark all as not checked** in the yellow bar. That turns accepted
+spans back to not checked but keeps edits, additions and drops. Undo reverses it.
+
 ### Overlapping spans
 
 Two spans of the same annotation shouldn't overlap. When you add a span or
@@ -111,6 +124,11 @@ review:
       start: 23757
       end: 24445
 ```
+
+If you edit or add a span and then accept it, it turns green, and the file
+marks it with `review: edited` (or `added`) plus `confirmed: true`. Opening that
+file again shows it green, and "Mark all as not checked" turns it back to orange
+(or purple).
 
 Before copying a finished file back into an OPF repo, remove the `review` fields
 and the top-level `review` block.
