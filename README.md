@@ -1,6 +1,7 @@
 # Text Format Review Tool
 
-A small web page for checking span annotations (Tsawa, Yigchung) in OPF books.
+A small web page for checking span annotations (Tsawa, Yigchung, Quotation,
+Chapter, Sabche) in OPF books.
 Reviewers open a book, see every annotated span highlighted, accept, fix or drop
 each one, add any that were missed, and export the result as a yaml file.
 
@@ -10,11 +11,13 @@ there is no server and no login.
 ## Using it
 
 1. Open the page.
-2. **Choose annotation**: Tsawa or Yigchung.
+2. **Choose annotation**: Tsawa, Yigchung, Quotation, Chapter or Sabche.
 3. **Add OPF folder**: pick the book folder, either `P000123` (the repo) or
    `P000123.opf`. The page finds the two files it needs inside:
    - `P000123.opf/base/v001.txt`
-   - `P000123.opf/layers/v001/Tsawa.yml` (or `Yigchung.yml`)
+   - `P000123.opf/layers/v001/Tsawa.yml` (or `Yigchung.yml`, `Quotation.yml`,
+     `Chapter.yml`, `Sabche.yml`; for Quotation, newer books use `Citation.yml`,
+     which is picked up too)
 4. If you're continuing an earlier review, also add the file you exported last
    time (for example `P000123-tsawa.yaml`) in the second box.
 5. Press **Open book** and review.
@@ -144,6 +147,13 @@ It's plain HTML, CSS and JavaScript with no build step.
 
 To add another annotation type, add its name to `ANNOTATIONS` at the top of
 `app.js`. The name must match the layer file name (`Sabche` → `Sabche.yml`).
+
+## Releasing a change
+
+`index.html` loads `style.css?v=…` and `app.js?v=…`. When you change either
+file, change that `v=` date in **both** links in `index.html`. Otherwise browsers
+can keep using the old files for a while after a push, which breaks the layout
+(new page with old styles).
 
 ## Files
 
