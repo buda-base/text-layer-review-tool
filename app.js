@@ -14,7 +14,11 @@
 
 // Annotation types offered in the "Choose annotation" list.
 // The name must match the layer file name: <opf>/layers/<base>/<Name>.yml
-const ANNOTATIONS = ["Tsawa", "Yigchung"];
+const ANNOTATIONS = ["Tsawa", "Yigchung", "Quotation", "Chapter", "Sabche"];
+// Other names the same layer goes by in some OPF books (file name and annotation_type).
+// Newer books store quotations as Citation.yml.
+const ALIASES = {Quotation: ["Citation"]};
+const namesFor = ann => [ann, ...(ALIASES[ann] || [])].map(n => n.toLowerCase());
 
 const PAGE_SIZE = 6000;                       // the book is drawn in blocks of about this many characters (cut at a line break), all in one long scroll
 const BREAKS = new Set(["་","༌","།","༎","༑","༔"," ","\n","\r","\t"]);
@@ -117,10 +121,10 @@ function analyzeFolder(files, annotation){
   }
   if (!bases.length) return {id, error: `No base .txt file in ${opfName}/base/.`};
 
-  const want = annotation.toLowerCase();
+  const wants = namesFor(annotation);
   const matches = layers.filter(l => {
     const n = l.rel[2].replace(/\.ya?ml$/i, "").toLowerCase();
-    return n === want || n.startsWith(want + "-");
+    return wants.some(want => n === want || n.startsWith(want + "-"));
   });
   if (!matches.length){
     const have = [...new Set(layers.map(l => l.rel[2].replace(/(-[^.]*)?\.ya?ml$/i, "")))];
@@ -195,7 +199,7 @@ $("openBtn").onclick = async () => {
 
   if (!layer || typeof layer !== "object" || !layer.annotations){ fail("The annotation file has no annotations in it."); return; }
   const type = String(layer.annotation_type || "");
-  if (type && type.toLowerCase() !== ann.toLowerCase()){ fail(`The annotation file says it is "${type}", not ${ann}.`); return; }
+  if (type && !namesFor(ann).includes(type.toLowerCase())){ fail(`The annotation file says it is "${type}", not ${ann}.`); return; }
   if (useResume && layer.review && layer.review.opf && String(layer.review.opf) !== S.found.id){ fail(`The review file was made for book ${layer.review.opf}, not ${S.found.id}.`); return; }
 
   S.opfId = S.found.id; S.annotation = ann;
